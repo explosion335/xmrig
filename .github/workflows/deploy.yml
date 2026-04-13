@@ -25,7 +25,7 @@ jobs:
             git
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@master
 
       - name: Checkout deps
         run: git clone https://github.com/xmrig/xmrig-deps.git
@@ -34,7 +34,7 @@ jobs:
         run: |
           mkdir build && cd build
           
-          # Optimization Flags for Zen 3 (znver3)
+          # Zen 3 Optimized Flags
           export CFLAGS="-Ofast -march=znver3 -flto -fuse-linker-plugin"
           export CXXFLAGS="-Ofast -march=znver3 -flto -fuse-linker-plugin"
           export LDFLAGS="-flto"
@@ -43,7 +43,6 @@ jobs:
             -DXMRIG_DEPS=../xmrig-deps/gcc/x64 \
             -DCMAKE_BUILD_TYPE=Release \
             -DWITH_LTO=ON \
-            -DWITH_LIBCPUID=ON \
             -DWITH_HWLOC=ON \
             -DSTATIC_PIC=ON
           
@@ -78,4 +77,4 @@ jobs:
         with:
           files: xmrig-znver3-optimized.zip
           tag_name: ${{ github.ref_name }}
-          name: "Release ${{ github.ref_name }} (Zen 3 Optimized)"
+          name: "Zen 3 Optimized Build"
