@@ -1,11 +1,11 @@
 on:
   workflow_dispatch: 
 
-name: Create Optimized Release
+name: Create release and build artifacts
 
 jobs:
   build_win:
-    name: Build Windows (Zen 3 Optimized)
+    name: Build Windows artifacts
     runs-on: windows-2025
     defaults:
       run:
@@ -22,70 +22,54 @@ jobs:
             mingw-w64-ucrt-x86_64-7zip
             cmake
             git
-
       - name: Checkout code
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@master
       - name: Checkout deps
         run: git clone https://github.com/xmrig/xmrig-deps.git
-
       - name: Build project on Windows
         run: |
-          mkdir build
-          cd build
-          
-          # Optimization Flags Breakdown:
-          # -march=znver3: Enables Zen 3 specific instructions (VAES, AVX2, etc.)
-          # -mtune=znver3: Optimizes instruction scheduling for Zen 3 pipelines
-          # -O3: Aggressive speed optimizations
-          # -flto: Link Time Optimization for cross-file efficiency
-          # -static: Ensures maximum portability for the optimized binary
-          
-          cmake .. -G "Unix Makefiles" \
-            -DXMRIG_DEPS=../xmrig-deps/gcc/x64 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DWITH_LTO=ON \
-            -DCMAKE_C_FLAGS="-march=znver3 -mtune=znver3 -O3 -flto -fno-fat-lto-objects" \
-            -DCMAKE_CXX_FLAGS="-march=znver3 -mtune=znver3 -O3 -flto -fno-fat-lto-objects"
-          
-          make -j$(nproc)
-          
-          # Preparation of Release Bundle
-          cp ../src/config.json .
-          cp ./WinRing0/WinRing0x64.sys .
-          7z a -tzip -mx9 xmrig-windows-znver3.zip xmrig.exe config.json WinRing0x64.sys
-
-      - name: Upload Artifacts for Deploy
+          cmake . -G "Unix Makefiles" \
+            -DXMRIG_DEPS=./xmrig-deps/gcc/x64 \
+            -DCMAKE_C_FLAGS="-O3 -march=znver3 -mtune=znver3 -flto" \
+            -DCMAKE_CXX_FLAGS="-O3 -march=znver3 -mtune=znver3 -flto" \
+            -DCMAKE_EXE_LINKER_FLAGS="-flto"
+          make -j2
+          cp ./src/config.json .
+          cp ./bin/WinRing0/WinRing0x64.sys .
+          7z a -tzip -mx windows_build.zip xmrig.exe config.json WinRing0x64.sys
+      - name: Upload Windows build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows_build
-          path: build/xmrig-windows-znver3.zip
-
+          path: windows_build.zip
   deploy:
     needs: [build_win]
-    name: Create Release and Upload
+    name: Create release and upload artifacts
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Download Build
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Set version
+        id: version
+        run: echo ::set-output name=VERSION::$GITHUB_REF_NAME
+      - name: Download Windows build artifacts
         uses: actions/download-artifact@v4
         with:
           name: windows_build
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: xmrig-windows-znver3.zip
-          tag_name: v${{ github.run_number }}
-          name: XMRig Zen 3 Optimized (Build ${{ github.run_number }})
-          body: |
-            ### Performance Optimizations
-            - **Architecture:** AMD Zen 3 (`znver3`)
-            - **Compiler:** GCC (UCRT64)
-            - **Flags:** `-O3`, `-flto`, `-march=znver3`, `-mtune=znver3`
-            - **Instruction Sets:** VAES, AVX2, SSE4.2 enabled.
-          draft: false
-          prerelease: false
+      - name: Upload Windows build release asset
+        uses: actions/upload-release-asset@v1.0.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: windows_build.zip
+          asset_name: xmrig-${{steps.version.outputs.VERSION}}-win64.zip
+          asset_content_type: application/zip
