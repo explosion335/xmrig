@@ -20,11 +20,12 @@ jobs:
             base-devel
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-7zip
+            mingw-w64-ucrt-x86_64-hwloc
             cmake
             git
 
       - name: Checkout code
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Checkout deps
         run: git clone https://github.com/xmrig/xmrig-deps.git
@@ -33,9 +34,9 @@ jobs:
         run: |
           mkdir build && cd build
           
-
-          export CFLAGS="-O3 -ffast-math -march=znver3 -flto -fuse-linker-plugin"
-          export CXXFLAGS="-O3 -ffast-math -march=znver3 -flto -fuse-linker-plugin"
+          # Optimization Flags for Zen 3 (znver3)
+          export CFLAGS="-Ofast -march=znver3 -flto -fuse-linker-plugin"
+          export CXXFLAGS="-Ofast -march=znver3 -flto -fuse-linker-plugin"
           export LDFLAGS="-flto"
 
           cmake .. -G "Unix Makefiles" \
@@ -43,23 +44,21 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DWITH_LTO=ON \
             -DWITH_LIBCPUID=ON \
-            -DWITH_ADL=OFF \
-            -DWITH_NVML=OFF \
-            -DSTATIC_PIC=ON \
-            -DWITH_EMBEDDED_CONFIG=OFF
+            -DWITH_HWLOC=ON \
+            -DSTATIC_PIC=ON
           
-          # Use all available cores on the runner to build faster
           make -j$(nproc)
           
-          cp ./src/config.json .
-          cp ./bin/WinRing0/WinRing0x64.sys .
-          7z a -tzip -mx windows_build.zip xmrig.exe config.json WinRing0x64.sys
+          # Prepare artifacts
+          cp ../src/config.json .
+          cp ../bin/WinRing0/WinRing0x64.sys .
+          7z a -tzip -mx9 ../xmrig-znver3-optimized.zip xmrig.exe config.json WinRing0x64.sys
 
       - name: Upload Windows build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows_build
-          path: windows_build.zip
+          name: windows_znver3_build
+          path: xmrig-znver3-optimized.zip
 
   deploy:
     needs: [build_win]
@@ -68,29 +67,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-      - name: Set version
-        id: version
-        run: echo ::set-output name=VERSION::$GITHUB_REF_NAME
-      - name: Download Windows build artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows_build
-      - name: Upload Windows build release asset
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: windows_znver3_build
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: windows_build.zip
-          asset_name: xmrig-${{steps.version.outputs.VERSION}}-win64.zip
-          asset_content_type: application/zip
+          files: xmrig-znver3-optimized.zip
+          tag_name: ${{ github.ref_name }}
+          name: "Release ${{ github.ref_name }} (Zen 3 Optimized)"
