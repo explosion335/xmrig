@@ -1,11 +1,11 @@
 on:
   workflow_dispatch: 
 
-name: Create release and build artifacts
+name: Create Optimized Release
 
 jobs:
   build_win:
-    name: Build Windows artifacts
+    name: Build Windows (Zen 3 Optimized)
     runs-on: windows-2025
     defaults:
       run:
@@ -20,61 +20,72 @@ jobs:
             base-devel
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-7zip
-            mingw-w64-ucrt-x86_64-hwloc
             cmake
             git
 
       - name: Checkout code
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Checkout deps
         run: git clone https://github.com/xmrig/xmrig-deps.git
 
       - name: Build project on Windows
         run: |
-          mkdir build && cd build
+          mkdir build
+          cd build
           
-          # Zen 3 Optimized Flags
-          export CFLAGS="-Ofast -march=znver3 -flto -fuse-linker-plugin"
-          export CXXFLAGS="-Ofast -march=znver3 -flto -fuse-linker-plugin"
-          export LDFLAGS="-flto"
-
+          # Optimization Flags Breakdown:
+          # -march=znver3: Enables Zen 3 specific instructions (VAES, AVX2, etc.)
+          # -mtune=znver3: Optimizes instruction scheduling for Zen 3 pipelines
+          # -O3: Aggressive speed optimizations
+          # -flto: Link Time Optimization for cross-file efficiency
+          # -static: Ensures maximum portability for the optimized binary
+          
           cmake .. -G "Unix Makefiles" \
             -DXMRIG_DEPS=../xmrig-deps/gcc/x64 \
             -DCMAKE_BUILD_TYPE=Release \
             -DWITH_LTO=ON \
-            -DWITH_HWLOC=ON \
-            -DSTATIC_PIC=ON
+            -DCMAKE_C_FLAGS="-march=znver3 -mtune=znver3 -O3 -flto -fno-fat-lto-objects" \
+            -DCMAKE_CXX_FLAGS="-march=znver3 -mtune=znver3 -O3 -flto -fno-fat-lto-objects"
           
           make -j$(nproc)
           
-          # Prepare artifacts
+          # Preparation of Release Bundle
           cp ../src/config.json .
-          cp ../bin/WinRing0/WinRing0x64.sys .
-          7z a -tzip -mx9 ../xmrig-znver3-optimized.zip xmrig.exe config.json WinRing0x64.sys
+          cp ./WinRing0/WinRing0x64.sys .
+          7z a -tzip -mx9 xmrig-windows-znver3.zip xmrig.exe config.json WinRing0x64.sys
 
-      - name: Upload Windows build artifacts
+      - name: Upload Artifacts for Deploy
         uses: actions/upload-artifact@v4
         with:
-          name: windows_znver3_build
-          path: xmrig-znver3-optimized.zip
+          name: windows_build
+          path: build/xmrig-windows-znver3.zip
 
   deploy:
     needs: [build_win]
-    name: Create release
+    name: Create Release and Upload
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download Artifacts
+      - name: Download Build
         uses: actions/download-artifact@v4
         with:
-          name: windows_znver3_build
+          name: windows_build
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: xmrig-znver3-optimized.zip
-          tag_name: ${{ github.ref_name }}
-          name: "Zen 3 Optimized Build"
+          files: xmrig-windows-znver3.zip
+          tag_name: v${{ github.run_number }}
+          name: XMRig Zen 3 Optimized (Build ${{ github.run_number }})
+          body: |
+            ### Performance Optimizations
+            - **Architecture:** AMD Zen 3 (`znver3`)
+            - **Compiler:** GCC (UCRT64)
+            - **Flags:** `-O3`, `-flto`, `-march=znver3`, `-mtune=znver3`
+            - **Instruction Sets:** VAES, AVX2, SSE4.2 enabled.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
